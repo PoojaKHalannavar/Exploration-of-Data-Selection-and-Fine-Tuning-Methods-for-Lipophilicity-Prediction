@@ -1,16 +1,19 @@
+# Data Selection using Tanimoto Similarity and saves them in a csv file
+
+
 import pandas as pd
 import numpy as np
 from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem
-from sklearn.metrics.pairwise import cosine_similarity
 import datasets
 
 # Function to convert SMILES to Morgan fingerprint
 def smiles_to_fingerprint(smiles, radius=2, n_bits=2048):
     mol = Chem.MolFromSmiles(smiles)
     if mol:
-        return np.array(AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits))
+        return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)  # Keep it as ExplicitBitVect
     return None
+
 
 '''
 In cheminformatics, the Tanimoto (or Jaccard) similarity is widely used for comparing binary molecular fingerprints. 
@@ -52,6 +55,6 @@ filtered_external_data = filter_external_data_tanimoto(target_smiles, external_d
 print(f"====================== Tanimoto filtered external data length : - ", len(filtered_external_data))
 
 # Save filtered external data to a new CSV file
-filtered_external_data.to_csv('/home/neuronet_team146/Project_Files/scripts/Tanimoto_Similarity_Filtered_Dataset.csv', index=False)
+filtered_external_data.to_csv('/home/neuronet_team146/Project_Files/scripts/task3_data_selection/Tanimoto_Similarity_Filtered_Dataset.csv', index=False)
 
-print(f"Filtered external data saved to '/home/neuronet_team146/Project_Files/scripts/Tanimoto_Similarity_Filtered_Dataset.csv'")
+print(f"Filtered external data saved to '/home/neuronet_team146/Project_Files/scripts/task3_data_selection/Tanimoto_Similarity_Filtered_Dataset.csv'")

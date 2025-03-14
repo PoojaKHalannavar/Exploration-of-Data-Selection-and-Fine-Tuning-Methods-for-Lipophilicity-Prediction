@@ -1,3 +1,5 @@
+# This file takes top-k high impact data points from csv file created in 2a and trains our model to further enchance its performance
+
 import datasets
 from transformers import AutoTokenizer, AutoModel
 import torch
@@ -27,7 +29,8 @@ dataset = datasets.load_dataset(DATASET_PATH)
 dataset = dataset['train'].train_test_split(test_size=0.2, seed=42)
 
 # Load filtered external dataset
-filtered_external_data = pd.read_csv('/home/neuronet_team146/Project_Files/scripts/Cosine_Similarity_Filtered_Dataset.csv')
+filtered_external_data = pd.read_csv('/home/neuronet_team146/Project_Files/scripts/External-Dataset_with_Influences.csv')
+filtered_external_data = filtered_external_data.head(120) 
 
 # Standardize column names
 train_data_df = dataset['train'].to_pandas()
@@ -69,7 +72,7 @@ test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 print(f"Train Dataloader Size: {len(train_dataloader.dataset)}")
 print(f"Test Dataloader Size: {len(test_dataloader.dataset)}")
 
-# BitFit: Freeze all weights except for biases
+# Define model without BitFit
 class MoLFormerWithRegressionHead(nn.Module):
     def __init__(self, model_name):
         super().__init__()
@@ -83,37 +86,15 @@ class MoLFormerWithRegressionHead(nn.Module):
 
     def forward(self, input_ids, attention_mask):
         outputs = self.molformer(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :]
+        pooled_output = outputs.last_hidden_state[:, 0, :]  # CLS token representation
         regression_output = self.regression_head(pooled_output)
         return regression_output.squeeze(-1)
 
-# Function to freeze model weights (BitFit)
-def freeze_all_but_bias(model):
-    for name, param in model.named_parameters():
-        if 'bias' not in name:
-            param.requires_grad = False  # Freeze weights
-        else:
-            param.requires_grad = True   # Keep bias trainable
-    return model
-
-# Load model and apply BitFit
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Load model and ensure all parameters are trainable
 model = MoLFormerWithRegressionHead(MODEL_NAME).to(device)
-model = freeze_all_but_bias(model)  # Freeze all but the bias terms
-
-# Print trainable parameters (only biases should be trainable)
-print("--------------- Checking Trainable Parameters -----------------------")
-# for name, param in model.named_parameters():
-    # if param.requires_grad:
-        #print(name, param.shape)
-
-print("==== Model with BitFit Loaded Successfully! ===================")
-#print(model)
 
 # Optimizer and loss function
-# optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=5e-6, weight_decay=0.01)
-
-optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-5)
+optimizer = optim.AdamW(model.parameters(), lr=1e-5)
 criterion = nn.MSELoss()
 
 # Training loop
@@ -166,4 +147,3 @@ with torch.no_grad():
     r2 = r2_score(all_labels, all_preds)
     print(f"Mean Absolute Error: {mae:.4f}")
     print(f"R^2 Score: {r2:.4f}")
-

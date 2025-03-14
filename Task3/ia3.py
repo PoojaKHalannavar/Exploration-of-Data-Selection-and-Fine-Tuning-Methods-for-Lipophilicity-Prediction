@@ -1,9 +1,12 @@
+# This file fine-tunes the model using IA3 method and gives MAE and R2 Score for comparison
+
+
 import datasets
 from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 from tqdm import tqdm
 import pandas as pd
 import warnings
@@ -27,7 +30,9 @@ dataset = datasets.load_dataset(DATASET_PATH)
 dataset = dataset['train'].train_test_split(test_size=0.2, seed=42)
 
 # Load filtered external dataset
-filtered_external_data = pd.read_csv('/home/neuronet_team146/Project_Files/scripts/Cosine_Similarity_Filtered_Dataset.csv')
+filtered_external_data = pd.read_csv('/home/neuronet_team146/Project_Files/scripts/task3_data_selection/Cosine_Similarity_Filtered_Dataset.csv')
+# filtered_external_data = pd.read_csv('/home/neuronet_team146/Project_Files/scripts/External-Dataset_with_Influence.csv')
+# filtered_external_data = filtered_external_data.head(130)  # Selects first 100 rows
 
 # Standardize column names
 train_data_df = dataset['train'].to_pandas()
@@ -62,82 +67,102 @@ tokenized_test_data = tokenize_function(dataset['test']['SMILES'])
 test_labels = dataset['test']['label']
 test_dataset = convert_to_torch(tokenized_test_data, test_labels)
 
+# Split training dataset into training and validation sets (80% train, 20% validation)
+train_size = int(0.8 * len(train_dataset))
+val_size = len(train_dataset) - train_size
+train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
+
 # Create DataLoaders
-train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+train_dataloader = DataLoader(train_subset, batch_size=32, shuffle=True)
+val_dataloader = DataLoader(val_subset, batch_size=32, shuffle=False)
 test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
 print(f"Train Dataloader Size: {len(train_dataloader.dataset)}")
+print(f"Validation Dataloader Size: {len(val_dataloader.dataset)}")
 print(f"Test Dataloader Size: {len(test_dataloader.dataset)}")
 
-# LoRA Adapter
-class LoRA(nn.Module):
-    def __init__(self, in_features, out_features, rank=16, alpha=32):
+# IA3 Adapter class
+class IA3(nn.Module):
+    def __init__(self, dim):
         super().__init__()
-        self.scaling = alpha / rank
-        self.A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
-        self.B = nn.Parameter(torch.randn(rank, out_features) * 0.01)
+        self.lambda_param = nn.Parameter(torch.ones(dim))  # Learnable scaling factor
 
     def forward(self, x):
-        return x @ self.A @ self.B * self.scaling
+        return x * self.lambda_param  # Element-wise scaling
+
+# IA3 Wrapper for Attention Layers
+class IA3Wrapper(nn.Module):
+    def __init__(self, original_layer):
+        super().__init__()
+        self.original_layer = original_layer  
+        self.ia3 = IA3(original_layer.in_features)  # IA3 scaling on input activations
+
+    def forward(self, x):
+        return self.original_layer(self.ia3(x))  # Apply IA3 before linear transformation
 
 def modify_model(model):
     for name, module in model.named_modules():
-        if any(x in name for x in ["query", "value"]):
+        if any(x in name for x in ["query", "value"]):  
             if isinstance(module, nn.Linear):
-                in_dim, out_dim = module.weight.shape
-                lora_adapter = LoRA(in_dim, out_dim).to(module.weight.device)
+                wrapped_layer = IA3Wrapper(module).to(module.weight.device)  # Wrap the layer
+                parent_name = ".".join(name.split(".")[:-1])  # Get the parent module name
+                layer_name = name.split(".")[-1]  # Get the layer name
 
-                original_forward = module.forward
+                parent_module = model.get_submodule(parent_name)  # Get the parent module
+                setattr(parent_module, layer_name, wrapped_layer)  # Replace layer with wrapped IA3 layer
 
-                def new_forward(x):
-                    return original_forward(x) + lora_adapter(x)
-
-                module.forward = new_forward
+                # Freeze original weights
                 module.weight.requires_grad = False
                 if module.bias is not None:
                     module.bias.requires_grad = False
-
     return model
 
-# MLM Model with Regression Head
-class MLMWithRegressionHead(nn.Module):
+# MoLFormer model with regression head
+class MoLFormerWithRegressionHead(nn.Module):
     def __init__(self, model_name):
         super().__init__()
-        self.mlm = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        self.molformer = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         self.regression_head = nn.Sequential(
-            nn.Linear(self.mlm.config.hidden_size, 256),
+            nn.Linear(self.molformer.config.hidden_size, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
 
     def forward(self, input_ids, attention_mask):
-        outputs = self.mlm(input_ids=input_ids, attention_mask=attention_mask)
+        outputs = self.molformer(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = outputs.last_hidden_state[:, 0, :]
-        return self.regression_head(pooled_output).squeeze(-1)
+        regression_output = self.regression_head(pooled_output)
+        return regression_output.squeeze(-1)
 
-# Load model and apply LoRA
-model = MLMWithRegressionHead(MODEL_NAME).to(device)
-model = modify_model(model)
+# Load and modify model
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = MoLFormerWithRegressionHead(MODEL_NAME).to(device)
+model = modify_model(model).to(device)
 
-print("--------------- Checking LORA Layers -----------------------")
+# Print trainable parameters
+print("--------------- Checking IA3 Layers -----------------------")
 # for name, param in model.named_parameters():
     # if param.requires_grad:
-        #print(name, param.shape)
+#        print(name, param.shape)
 
-print("==== Model with Regression Head Loaded Successfully! ===================")
+print("==== Model with IA3 Adaptation Loaded Successfully! ===================")
+#print(model)
 
-# Optimizer & Loss
-optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-5)
+# Optimizer and loss function
+# optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-5)
+optimizer = optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=5e-6, weight_decay=0.01)
+
 criterion = nn.MSELoss()
 
-# Training Loop
+# Training loop
 print("-------------Train started!---------------")
 model.train()
-EPOCHS = 10
+EPOCHS = 15
 
 for epoch in range(EPOCHS):
     running_loss = 0.0
+    val_running_loss = 0.0
     for batch in tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}"):
         input_ids, attention_mask, labels = (b.to(device) for b in batch)
 
@@ -151,8 +176,23 @@ for epoch in range(EPOCHS):
 
         running_loss += loss.item()
 
-    avg_loss = running_loss / len(train_dataloader)
-    print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {avg_loss:.4f}")
+    avg_train_loss = running_loss / len(train_dataloader)
+
+    # Validation Loss
+    model.eval()
+    with torch.no_grad():
+        for batch in tqdm(val_dataloader, desc=f"Validation Epoch {epoch+1}/{EPOCHS}"):
+            input_ids, attention_mask, labels = (b.to(device) for b in batch)
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+
+            loss = criterion(outputs, labels)
+            val_running_loss += loss.item()
+
+    avg_val_loss = val_running_loss / len(val_dataloader)
+    print(f"Epoch {epoch+1}/{EPOCHS} - Train Loss: {avg_train_loss:.4f} - Val Loss: {avg_val_loss:.4f}")
+
+    # Reset model to training mode
+    model.train()
 
 print("Training complete!")
 
@@ -181,3 +221,4 @@ with torch.no_grad():
 
     print(f"Mean Absolute Error: {mae:.4f}")
     print(f"R^2 Score: {r2:.4f}")
+
