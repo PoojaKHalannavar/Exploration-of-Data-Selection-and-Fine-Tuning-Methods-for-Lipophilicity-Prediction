@@ -5,7 +5,7 @@ It was divided into three tasks:
 
 - [Task1: Supervised and Unsupervised Fine-tuning of a Chemical Language Model on Lipophilicity](https://github.com/PoojaKHalannavar/Exploration-of-Data-Selection-and-Fine-Tuning-Methods-for-Lipophilicity-Prediction/blob/master/Task1/Task1.md)
 - [Task2: Influence Function-based Data Selection](https://github.com/PoojaKHalannavar/Exploration-of-Data-Selection-and-Fine-Tuning-Methods-for-Lipophilicity-Prediction/blob/master/Task2/Task2.md)
-- [Task3: Exploration of Other Data Selection and Fine-Tuning Methods](https://github.com/PoojaKHalannavar/Exploration-of-Data-Selection-and-Fine-Tuning-Methods-for-Lipophilicity-Prediction/blob/master/Task3/Task3.md)
+- [Task3: Exploration of Alternative Data Selection and Fine-Tuning Methods](https://github.com/PoojaKHalannavar/Exploration-of-Data-Selection-and-Fine-Tuning-Methods-for-Lipophilicity-Prediction/blob/master/Task3/Task3.md)
 
 ### Dataset: 
 
