@@ -1,4 +1,4 @@
-# Task 3: Exploration of Other Data Selection and Fine-Tuning Methods
+# Task 3: Exploration of Alternative Data Selection and Fine-Tuning Methods
 
 In this task, we explore alternative methods for data selection and investigate several fine-tuning techniques to adapt a pre-trained model for a specific task. The goal is to improve the model performance on our target dataset.
 
